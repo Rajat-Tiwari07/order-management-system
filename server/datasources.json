@@ -1,0 +1,11 @@
+{
+  "db": {
+    "name": "db",
+    "connector": "postgresql",
+    "host": "localhost",
+    "port": 5433,
+    "database": "order_management",
+    "username": "order_app",
+    "password": "Ra@070702"
+  }
+}

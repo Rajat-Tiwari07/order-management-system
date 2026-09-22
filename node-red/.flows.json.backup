@@ -1,0 +1,415 @@
+[
+    {
+        "id": "order-monitor",
+        "type": "tab",
+        "label": "Complete Order Flow",
+        "disabled": false,
+        "info": "The nodes represent the real LoopBack, PostgreSQL, RabbitMQ, Redis, and worker stages. Events come from the running application."
+    },
+    {
+        "id": "architecture-note",
+        "type": "comment",
+        "z": "order-monitor",
+        "name": "REAL FLOW: API -> PostgreSQL -> RabbitMQ -> 3 workers -> Redis state -> ACK/NACK",
+        "info": "Node-RED is observing the application events; it does not duplicate business logic.",
+        "x": 430,
+        "y": 35,
+        "wires": []
+    },
+    {
+        "id": "order-trigger",
+        "type": "inject",
+        "z": "order-monitor",
+        "name": "Create test order",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"customerId\":1,\"items\":[{\"productId\":1,\"quantity\":1}]}",
+        "payloadType": "json",
+        "x": 120,
+        "y": 100,
+        "wires": [
+            [
+                "prepare-order-request"
+            ]
+        ]
+    },
+    {
+        "id": "prepare-order-request",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "LoopBack API request",
+        "func": "msg.headers = {'Content-Type': 'application/json'};\nmsg.method = 'POST';\nmsg.url = 'http://localhost:3001/api/orders/create';\nreturn msg;",
+        "outputs": 1,
+        "x": 330,
+        "y": 100,
+        "wires": [
+            [
+                "create-order-request"
+            ]
+        ]
+    },
+    {
+        "id": "create-order-request",
+        "type": "http request",
+        "z": "order-monitor",
+        "name": "POST /api/orders/create",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "persist": false,
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 550,
+        "y": 100,
+        "wires": [
+            [
+                "api-response-debug"
+            ]
+        ]
+    },
+    {
+        "id": "api-response-debug",
+        "type": "debug",
+        "z": "order-monitor",
+        "name": "API response",
+        "active": true,
+        "tosidebar": true,
+        "complete": "true",
+        "targetType": "full",
+        "x": 760,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "event-input",
+        "type": "http in",
+        "z": "order-monitor",
+        "name": "Real app events",
+        "url": "/order-event",
+        "method": "post",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 115,
+        "y": 260,
+        "wires": [
+            [
+                "normalize-event"
+            ]
+        ]
+    },
+    {
+        "id": "normalize-event",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "Event received from app",
+        "func": "const incoming = msg.payload || {};\nconst data = incoming.data || {};\nmsg.topic = incoming.event || 'unknown';\nmsg.payload = {\n  event: msg.topic,\n  timestamp: incoming.timestamp,\n  orderId: data.orderId || data.id || null,\n  worker: data.worker || null,\n  retryCount: data.retryCount || null,\n  status: data.status || null,\n  details: data\n};\nreturn msg;",
+        "outputs": 1,
+        "x": 340,
+        "y": 260,
+        "wires": [
+            [
+                "event-router",
+                "event-response"
+            ]
+        ]
+    },
+    {
+        "id": "event-router",
+        "type": "switch",
+        "z": "order-monitor",
+        "name": "Route real lifecycle event",
+        "property": "topic",
+        "propertyType": "msg",
+        "checkall": "false",
+        "repair": false,
+        "outputs": 7,
+        "rules": [
+            {
+                "t": "regex",
+                "v": "^rabbitmq\\..*(ack|nack|requeue|final-ack)",
+                "vt": "str",
+                "case": false
+            },
+            {
+                "t": "regex",
+                "v": "^(order|api|database)",
+                "vt": "str",
+                "case": false
+            },
+            {
+                "t": "regex",
+                "v": "^rabbitmq",
+                "vt": "str",
+                "case": false
+            },
+            {
+                "t": "regex",
+                "v": "^redis",
+                "vt": "str",
+                "case": false
+            },
+            {
+                "t": "regex",
+                "v": "^(payment\\.processed|worker\\.payment)",
+                "vt": "str",
+                "case": false
+            },
+            {
+                "t": "regex",
+                "v": "^(inventory\\.updated|worker\\.inventory)",
+                "vt": "str",
+                "case": false
+            },
+            {
+                "t": "regex",
+                "v": "^(notification\\.sent|notification\\.failed|worker\\.notification)",
+                "vt": "str",
+                "case": false
+            }
+        ],
+        "x": 570,
+        "y": 260,
+        "wires": [
+            [
+                "ack-stage"
+            ],
+            [
+                "api-stage"
+            ],
+            [
+                "rabbit-stage"
+            ],
+            [
+                "redis-stage"
+            ],
+            [
+                "payment-stage"
+            ],
+            [
+                "inventory-stage"
+            ],
+            [
+                "notification-stage"
+            ]
+        ]
+    },
+    {
+        "id": "api-stage",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "API + PostgreSQL",
+        "func": "node.status({fill:'blue',shape:'dot',text:'customer/product/order database stage'});\nreturn msg;",
+        "outputs": 1,
+        "x": 790,
+        "y": 160,
+        "wires": [
+            [
+                "api-stage-debug"
+            ]
+        ]
+    },
+    {
+        "id": "api-stage-debug",
+        "type": "debug",
+        "z": "order-monitor",
+        "name": "API/PostgreSQL events",
+        "active": true,
+        "tosidebar": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1040,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "rabbit-stage",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "RabbitMQ exchange: order.events",
+        "func": "node.status({fill:'orange',shape:'dot',text:'topic event published/received'});\nreturn msg;",
+        "outputs": 1,
+        "x": 820,
+        "y": 220,
+        "wires": [
+            [
+                "rabbit-stage-debug"
+            ]
+        ]
+    },
+    {
+        "id": "rabbit-stage-debug",
+        "type": "debug",
+        "z": "order-monitor",
+        "name": "RabbitMQ events",
+        "active": true,
+        "tosidebar": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1060,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "redis-stage",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "Redis lock/status/retry",
+        "func": "node.status({fill:'red',shape:'dot',text:'worker state and retry counter'});\nreturn msg;",
+        "outputs": 1,
+        "x": 790,
+        "y": 280,
+        "wires": [
+            [
+                "redis-stage-debug"
+            ]
+        ]
+    },
+    {
+        "id": "redis-stage-debug",
+        "type": "debug",
+        "z": "order-monitor",
+        "name": "Redis events",
+        "active": true,
+        "tosidebar": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1030,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "payment-stage",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "Payment worker | payment.queue",
+        "func": "node.status({fill:'green',shape:'dot',text:'payment business operation'});\nreturn msg;",
+        "outputs": 1,
+        "x": 800,
+        "y": 360,
+        "wires": [
+            [
+                "payment-debug"
+            ]
+        ]
+    },
+    {
+        "id": "payment-debug",
+        "type": "debug",
+        "z": "order-monitor",
+        "name": "Payment worker events",
+        "active": true,
+        "tosidebar": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1050,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "inventory-stage",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "Inventory worker | inventory.queue",
+        "func": "node.status({fill:'green',shape:'dot',text:'stock reduction operation'});\nreturn msg;",
+        "outputs": 1,
+        "x": 820,
+        "y": 420,
+        "wires": [
+            [
+                "inventory-debug"
+            ]
+        ]
+    },
+    {
+        "id": "inventory-debug",
+        "type": "debug",
+        "z": "order-monitor",
+        "name": "Inventory worker events",
+        "active": true,
+        "tosidebar": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1060,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "notification-stage",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "Notification worker | notification.queue",
+        "func": "node.status({fill:'green',shape:'dot',text:'notification operation'});\nreturn msg;",
+        "outputs": 1,
+        "x": 830,
+        "y": 480,
+        "wires": [
+            [
+                "notification-debug"
+            ]
+        ]
+    },
+    {
+        "id": "notification-debug",
+        "type": "debug",
+        "z": "order-monitor",
+        "name": "Notification worker events",
+        "active": true,
+        "tosidebar": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1080,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "ack-stage",
+        "type": "function",
+        "z": "order-monitor",
+        "name": "ACK / NACK / retry",
+        "func": "node.status({fill:'yellow',shape:'dot',text:'message acknowledgement or requeue'});\nreturn msg;",
+        "outputs": 1,
+        "x": 800,
+        "y": 540,
+        "wires": [
+            [
+                "ack-debug"
+            ]
+        ]
+    },
+    {
+        "id": "ack-debug",
+        "type": "debug",
+        "z": "order-monitor",
+        "name": "ACK/NACK events",
+        "active": true,
+        "tosidebar": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1030,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "event-response",
+        "type": "http response",
+        "z": "order-monitor",
+        "name": "Event received",
+        "statusCode": "200",
+        "headers": {},
+        "x": 570,
+        "y": 620,
+        "wires": []
+    }
+]

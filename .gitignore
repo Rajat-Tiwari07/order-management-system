@@ -1,0 +1,57 @@
+*.csv
+*.dat
+*.iml
+*.log
+*.out
+*.pid
+*.seed
+*.sublime-*
+*.swo
+*.swp
+*.tgz
+*.xml
+.DS_Store
+.idea
+.project
+.strong-pm
+coverage
+node_modules
+npm-debug.log
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node.js and package-manager artifacts
+.npm/
+.yarn/
+.pnpm-store/
+.parcel-cache/
+.cache/
+dist/
+build/
+tmp/
+temp/
+
+# Editor and workspace files
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+*.code-workspace
+
+# Local AI assistant files and directories
+.ai/
+.aider*
+.claude/
+.continue/
+.cursor/
+.windsurf/
+*.ai
+
+# Test and tool output
+.nyc_output/
+test-results/
+playwright-report/
